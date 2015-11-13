@@ -11,6 +11,9 @@ using System.Data.SQLite;
 using System.Net;
 using System.Windows.Forms;
 using System.Text.RegularExpressions;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json;
+
 
 namespace Jahvahnbot
 {
@@ -46,7 +49,7 @@ namespace Jahvahnbot
 		private NetworkStream networkStream = null;
 		private StreamReader connectionStreamReader = null;
 		private StreamWriter connectionStreamWriter = null, errorLog = null;
-		private string allowlink, cmdoncd = "";
+		private string allowlink, cmdoncd = "", ytID = "", ytResponse = "";
 		private HashSet<string> ModList = new HashSet<string>();
 		private List<string> waitlist = new List<string>();
 		private List<string> quotes = new List<string>();
@@ -675,18 +678,64 @@ namespace Jahvahnbot
 		#endregion
 		public bool RemoteFileExists(string url)
 		{
-			if (!url.StartsWith("http://") || !url.StartsWith("https://"))
-				url = "http://" + url;
-			try
+			if (ytID != "")
 			{
-				Uri uriResult;
-				return Uri.TryCreate(url, UriKind.Absolute, out uriResult) && uriResult.Scheme == Uri.UriSchemeHttp;
-			}
-			catch(Exception e)
-			{
-				MessageBox.Show(e.ToString());
-				Log("Link protection message: " + e);
+				try
+				{
+					using (WebClient c = new WebClient())
+					{
+						string json_data = "[" + c.DownloadString("https://www.googleapis.com/youtube/v3/videos?key="+ Jahvahnbot.Properties.Settings.Default.ytAPI +"&part=snippet,contentDetails&fields=items(snippet(title),contentDetails(duration))&id=" + ytID) + "]";
+						JArray a = JArray.Parse(json_data);
+						foreach (JObject o in a.Children<JObject>())
+						{
+							foreach (JProperty p in o.Properties())
+							{
+								if (p.Name == "items")
+								{
+									JArray f = JArray.Parse(p.Value.ToString());
+									foreach (JObject fo in f.Children<JObject>())
+									{
+										foreach (JProperty fp in fo.Properties())
+										{
+											byte[] bytes = Encoding.Default.GetBytes(fp.Value.ToString().Remove(0, 15));
+											string vidTitle = Encoding.UTF8.GetString(bytes);
+											vidTitle = vidTitle.Remove(vidTitle.Length - 4, 4);
+											if (vidTitle.IndexOf(":") == 0 && vidTitle.IndexOf(" ") == 1 &&
+												vidTitle.IndexOf("\"") == 2 && vidTitle.IndexOf("P") == 3)
+												vidTitle = vidTitle.Remove(0, 3);
+											if (vidTitle.StartsWith("P"))
+												ytResponse = "[" + System.Xml.XmlConvert.ToTimeSpan(vidTitle) + "]" + ytResponse;
+											else
+												ytResponse += " - " + vidTitle;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				catch (Exception e)
+				{
+					Log("YTPostLink error - " + e);
+				}
+				ytID = "";
 				return false;
+			}
+			else
+			{
+				if (!url.StartsWith("http://") || !url.StartsWith("https://"))
+					url = "http://" + url;
+				try
+				{
+					Uri uriResult;
+					return Uri.TryCreate(url, UriKind.Absolute, out uriResult) && uriResult.Scheme == Uri.UriSchemeHttp;
+				}
+				catch (Exception e)
+				{
+					MessageBox.Show(e.ToString());
+					Log("Link protection message: " + e);
+					return false;
+				}
 			}
 		}
 		public void putonCooldown()
@@ -1050,6 +1099,7 @@ namespace Jahvahnbot
 				{
 					h += m.Value;
 				}
+				ytID = Regex.Match(g, @"(?:https?:\/\/)?(?:www\.)?youtu(?:.be\/|be\.com\/watch\?v=|be\.com\/v\/)(.{8,})").Groups[1].Value;
 			}
 			return RemoteFileExists(h);
 		}
@@ -1187,6 +1237,7 @@ namespace Jahvahnbot
 					skip = false;
 					if ((data = connectionStreamReader.ReadLine()) != null)
 					{
+						
 						char[] charSeparator = new char[] { ' ' };
 						string message = "";
 						ex = data.Split(charSeparator, 5);
@@ -1256,14 +1307,12 @@ namespace Jahvahnbot
 									if (isLink(message))
 									{
 										if (!message.Contains("imgur.com") &&
-											!message.Contains("youtube.com") &&
 											!message.Contains("soundcloud.com") &&
 											!message.Contains("amazon.com") &&
 											!message.Contains("osu.ppy.sh") &&
 											!message.Contains("myanimelist.net") &&
 											!message.Contains("amazon.co.uk") &&
 											!message.Contains("amazon.ca") &&
-											!message.Contains("youtu.be") &&
 											!message.Contains("kancolle.wikia.com"))
 										{
 											if (username != allowlink && !ModList.Contains(username))
@@ -1280,7 +1329,11 @@ namespace Jahvahnbot
 									}
 									else
 									{
-
+										if (ytResponse != "")
+										{
+											sM(username + " linked a video - " + ytResponse);
+											ytResponse = "";
+										}
 									}
 								}
 								#endregion
@@ -1628,8 +1681,10 @@ namespace Jahvahnbot
 											globalTimer = 0;
 										}
 										else if (command.StartsWith("!osurequest") && ex.Length > 4)
+										{
 											if (ex[4].StartsWith("http"))
 												AddToCooldown(ex);
+										}
 										#endregion
 										#region Highlight
 										else if (command.StartsWith("!highlight") && isMod((ex[0].Substring(ex[0].IndexOf(":"), ex[0].IndexOf("!"))).Replace(":", "")))
@@ -1820,6 +1875,7 @@ namespace Jahvahnbot
 											}
 										}
 										#endregion
+
 									}
 									catch (Exception e)
 									{
@@ -1852,15 +1908,22 @@ namespace Jahvahnbot
 							}
 							#endregion
 						}
-						Console.WriteLine(data);
-						if (quotelines > 100)
+						try
 						{
-							quotelines = 0;
-							if (quotes.Count > 0)
-								sM(quotes[new Random().Next(0, quotes.Count)]);
-							else
-								sM("No quotes available.");
-						}	
+							Console.WriteLine(data);
+							if (quotelines > 100)
+							{
+								quotelines = 0;
+								if (quotes.Count > 0)
+									sM(quotes[new Random().Next(0, quotes.Count)]);
+								else
+									sM("No quotes available.");
+							}
+						}
+						catch(Exception gg)
+						{
+							Log("Error outside main forumla - " + gg);
+						}
 					}
 					else
 					{
