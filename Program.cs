@@ -723,12 +723,25 @@ namespace Jahvahnbot
 			}
 			else
 			{
-				if (!url.StartsWith("http://") || !url.StartsWith("https://"))
-					url = "http://" + url;
+                if (!url.StartsWith("http"))
+                    url = "http://" + url;
 				try
 				{
 					Uri uriResult;
-					return Uri.TryCreate(url, UriKind.Absolute, out uriResult) && uriResult.Scheme == Uri.UriSchemeHttp;
+                    bool g = Uri.TryCreate(url, UriKind.Absolute, out uriResult) && uriResult.Scheme == Uri.UriSchemeHttp;
+                    using (var client = new MyClient())
+                    {
+                        client.HeadOnly = true;
+                        try
+                        {
+                            var dd = client.DownloadData(uriResult);
+                        }
+                        catch (Exception e)
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
 				}
 				catch (Exception e)
 				{
@@ -1099,8 +1112,8 @@ namespace Jahvahnbot
 				{
 					h += m.Value;
 				}
-				ytID = Regex.Match(g, @"(?:https?:\/\/)?(?:www\.)?youtu(?:.be\/|be\.com\/watch\?v=|be\.com\/v\/)(.{8,})").Groups[1].Value;
 			}
+			ytID = Regex.Match(h, @"(?:https?:\/\/)?(?:www\.)?youtu(?:.be\/|be\.com\/watch\?v=|be\.com\/v\/)(.{8,})").Groups[1].Value;
 			return RemoteFileExists(h);
 		}
 		public bool isMod(string user)
@@ -1211,6 +1224,24 @@ namespace Jahvahnbot
 			errorLog.Flush();
 			errorLog.WriteLine("-----------------------------");
 			errorLog.Flush();
+            try
+            {
+                System.Net.Mail.MailMessage messaged = new System.Net.Mail.MailMessage();
+                messaged.To.Add("hailzaros@gmail.com");
+                messaged.Subject = "[" + DateTime.Today + "] Haru Bug Report";
+                messaged.From = new System.Net.Mail.MailAddress("harurequests@gmail.com");
+                messaged.Body = "Haru has crashed at " + DateTime.Today + " Due to a critical error at; \n" + message;
+                System.Net.Mail.SmtpClient SmtpServer = new System.Net.Mail.SmtpClient("smtp.gmail.com");
+                SmtpServer.Port = 587;
+                SmtpServer.UseDefaultCredentials = false;
+                SmtpServer.Credentials = new System.Net.NetworkCredential("harurequests", Jahvahnbot.Properties.Settings.Default.mailPassword);
+                SmtpServer.EnableSsl = true;
+                SmtpServer.Send(messaged);
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Source);
+            }
 		}
 		#endregion
 		#region everything else
@@ -1319,7 +1350,6 @@ namespace Jahvahnbot
 											{
 												purge(username);
 												timeout(username);
-												Console.WriteLine("POOF");
 											}
 											else
 											{
@@ -1331,7 +1361,7 @@ namespace Jahvahnbot
 									{
 										if (ytResponse != "")
 										{
-											sM(username + " linked a video - " + ytResponse);
+											sM(ytResponse);
 											ytResponse = "";
 										}
 									}
@@ -1938,10 +1968,11 @@ namespace Jahvahnbot
 					connectionStreamWriter.Close(); connectionStreamReader.Close();	
 					networkStream.Close();	IRCConnection.Close(); errorLog.Close();
 					connectionStreamWriter = null; connectionStreamReader = null;
-					networkStream = null; errorLog = null;
-					IRCConnection = null;
+					networkStream = null; errorLog = null;	IRCConnection = null;
 				}
 			}
+			Thread.CurrentThread.Abort();
+			Connect();
 		}
 		#endregion
 	}
@@ -1958,4 +1989,17 @@ namespace Jahvahnbot
 			Application.Run(main);
 		}
 	}
+    class MyClient : WebClient
+    {
+        public bool HeadOnly { get; set; }
+        protected override WebRequest GetWebRequest(Uri address)
+        {
+            WebRequest req = base.GetWebRequest(address);
+            if (HeadOnly && req.Method == "GET")
+            {
+                req.Method = "HEAD";
+            }
+            return req;
+        }
+    }
 }
